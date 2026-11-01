@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static seedu.address.testutil.TypicalPersons.ALICE;
+import static seedu.address.testutil.TypicalPersons.BENSON;
 import static seedu.address.testutil.TypicalPersons.NAME_ONLY;
 
 import java.io.IOException;
@@ -163,6 +164,87 @@ class FieldOrderUiTest {
     }
 
     @Test
+    void window_orderPreservesSelectedFollowUpAndContactOnSuccessAndFailure() throws Exception {
+        Path contactsPath = testFolder.resolve("contacts.json");
+        Path prefsPath = testFolder.resolve("preferences.json");
+        ModelManager model = new ModelManager();
+        model.addPerson(ALICE);
+        model.addPerson(BENSON);
+        JsonContactFileStorage contactStorage = new JsonContactFileStorage(contactsPath);
+        JsonUserPrefsStorage prefsStorage = new JsonUserPrefsStorage(prefsPath);
+        contactStorage.saveContactFile(model.getContactFile());
+        prefsStorage.saveUserPrefs(model.getUserPrefs());
+        FailingPreferences prefs = new FailingPreferences(prefsPath);
+        LogicManager logic = new LogicManager(model, new StorageManager(contactStorage, prefs));
+        logic.execute("followup 1 a/Alice action");
+        logic.execute("followup 2 a/Bob action");
+        Person aliceWithAction = model.getContactFile().getPersonList().getFirst();
+        byte[] contactBytes = Files.readAllBytes(contactsPath);
+        FieldOrder custom = new FieldOrder(List.of("phone", "name", "tags", "company", "role", "email",
+                "linkedin", "followups", "introducer", "interactions"));
+        FxTestUtil.runOnFxThread(() -> {
+            Stage stage = new Stage();
+            MainWindow window = new MainWindow(stage, logic, contactsPath);
+            window.fillInnerParts("Loaded");
+            window.show();
+            TextField input = (TextField) stage.getScene().lookup("#commandTextField");
+            TextArea output = (TextArea) stage.getScene().lookup("#resultDisplay");
+            execute(input, "find Alice");
+            execute(input, "followups");
+            execute(input, "2");
+            Label followUp = (Label) stage.getScene().lookup("#selectedFollowUpText");
+            assertTrue(followUp.getText().contains("Bob action"));
+            assertEquals(BENSON.getName().fullName,
+                    ((Label) stage.getScene().lookup("#detailName")).getText());
+
+            execute(input, "order " + custom);
+            assertTrue(stage.getScene().lookup("#followUpListPanel").isVisible());
+            assertTrue(followUp.getText().contains("Bob action"));
+            assertEquals(BENSON.getName().fullName,
+                    ((Label) stage.getScene().lookup("#detailName")).getText());
+            assertEquals(List.of(aliceWithAction), model.getFilteredPersonList());
+            assertArrayEquals(contactBytes, readBytes(contactsPath));
+            byte[] savedPrefs = readBytes(prefsPath);
+
+            execute(input, "order");
+            assertTrue(stage.getScene().lookup("#followUpListPanel").isVisible());
+            assertTrue(followUp.getText().contains("Bob action"));
+            assertEquals(BENSON.getName().fullName,
+                    ((Label) stage.getScene().lookup("#detailName")).getText());
+            execute(input, "order " + custom);
+            assertTrue(stage.getScene().lookup("#followUpListPanel").isVisible());
+            assertTrue(followUp.getText().contains("Bob action"));
+            assertEquals(BENSON.getName().fullName,
+                    ((Label) stage.getScene().lookup("#detailName")).getText());
+            prefs.shouldFail = true;
+            execute(input, "order " + FieldOrder.DEFAULT);
+            assertEquals(custom, model.getFieldOrder());
+            assertTrue(stage.getScene().lookup("#followUpListPanel").isVisible());
+            assertTrue(followUp.getText().contains("Bob action"));
+            assertEquals(BENSON.getName().fullName,
+                    ((Label) stage.getScene().lookup("#detailName")).getText());
+            assertEquals(List.of(aliceWithAction), model.getFilteredPersonList());
+            assertArrayEquals(contactBytes, readBytes(contactsPath));
+            assertArrayEquals(savedPrefs, readBytes(prefsPath));
+            assertTrue(output.getText().contains("Could not save data"));
+
+            prefs.shouldFail = false;
+            execute(input, "view " + BENSON.getName().fullName);
+            assertEquals(BENSON.getName().fullName,
+                    ((Label) stage.getScene().lookup("#detailName")).getText());
+            assertFalse(stage.getScene().lookup("#followUpListPanel").isVisible());
+            execute(input, "order");
+            assertEquals(BENSON.getName().fullName,
+                    ((Label) stage.getScene().lookup("#detailName")).getText());
+            execute(input, "order " + custom);
+            assertEquals(BENSON.getName().fullName,
+                    ((Label) stage.getScene().lookup("#detailName")).getText());
+            stage.hide();
+        });
+        assertArrayEquals(contactBytes, Files.readAllBytes(contactsPath));
+    }
+
+    @Test
     void window_externalOrderNotification_refreshesDisplayedDetailsImmediately() throws Exception {
         ContactFile contacts = new ContactFile();
         contacts.addPerson(WITH_ACTION);
@@ -218,6 +300,14 @@ class FieldOrderUiTest {
     private static List<String> rowIds(Node root) {
         VBox rows = (VBox) root.lookup("#fields");
         return rows.getChildren().stream().map(Node::getId).toList();
+    }
+
+    private static byte[] readBytes(Path path) {
+        try {
+            return Files.readAllBytes(path);
+        } catch (IOException exception) {
+            throw new AssertionError(exception);
+        }
     }
 
     private static void execute(TextField input, String command) {

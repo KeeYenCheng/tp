@@ -139,8 +139,15 @@ public class MainWindow extends UiPart<Stage> {
 
         personDetailsPanel = new PersonDetailsPanel();
         personDetailsPlaceholder.getChildren().add(personDetailsPanel.getRoot());
-        personListPanel.selectedPersonProperty().addListener((observable, previous, current) -> showContact(current));
+        personListPanel.selectedPersonProperty().addListener((observable, previous, current) -> {
+            if (!isOrderCommand(lastCommand.getText())) {
+                showContact(current);
+            }
+        });
         logic.getFilteredPersonList().addListener((ListChangeListener<Person>) change -> {
+            if (isOrderCommand(lastCommand.getText())) {
+                return;
+            }
             showContactList();
             personListPanel.selectFirstIfNeeded();
             showContact(personListPanel.selectedPersonProperty().get());
@@ -252,15 +259,19 @@ public class MainWindow extends UiPart<Stage> {
         } catch (CommandException | ParseException | RuntimeException e) {
             logger.fine("Command failed: " + e.getClass().getSimpleName());
             confirmationPanel.showRequest(null);
-            showContactList();
-            showContact(personListPanel.selectedPersonProperty().get());
+            if (!isOrderCommand(commandText)) {
+                showContactList();
+                showContact(personListPanel.selectedPersonProperty().get());
+            }
             resultDisplay.setFeedbackToUser(e.getMessage() == null ? "Unexpected command failure." : e.getMessage());
             throw e;
         }
     }
 
     private void displayResult(CommandResult result) {
-        if (result.getFollowUpListing().isPresent()) {
+        if (isOrderCommand(lastCommand.getText())) {
+            resultDisplay.setFeedbackToUser(result.getFeedbackToUser());
+        } else if (result.getFollowUpListing().isPresent()) {
             personListPanel.getRoot().setVisible(false);
             personListPanel.getRoot().setManaged(false);
             followUpListPanel.getRoot().setVisible(true);
@@ -290,6 +301,10 @@ public class MainWindow extends UiPart<Stage> {
                 resultDisplay.setFeedbackToUser(result.getFeedbackToUser());
             }
         }
+    }
+
+    private static boolean isOrderCommand(String commandText) {
+        return commandText.stripLeading().split("\\s+", 2)[0].equals("order");
     }
 
     private void showContactList() {
